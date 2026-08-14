@@ -26,8 +26,10 @@
   只有成功才创建 → 重试永远安全; 重试时把上次打印的 previewUrl 传回
   --*-url 只重跑 save,无需重新裸传。
 
---function-uid 预留: 当前后端忽略 body 里的 functionUid(每次 save 都新建,
-  实测),将来后端支持更新语义时该参数自动生效,脚本无需改动。
+--function-uid 可选(场景 A 的 Web 功能 functionUid):
+  不传/空 = 新建记录(当前默认行为);
+  传真实值 = 覆盖更新该 functionUid 对应的历史记录(后端支持可选,
+  body 带 functionUid 即更新语义)。占位符 xxxx 仍拒绝。
 
 退出码: 0=成功; 2=参数错误/元数据占位符/上传或 save 失败
 """
@@ -65,7 +67,7 @@ def main() -> int:
     ap.add_argument("--description", default="", help="功能描述(message;也用于理解测试需求)")
     ap.add_argument("--test-case-uids", default="", help="关联用例(message,逗号分隔)")
     ap.add_argument("--resource-uids", default="", help="静态资源 selectedResourceUids(message,逗号分隔)")
-    ap.add_argument("--function-uid", default="", help="预留: 当前后端忽略(每次 save 新建),将来更新语义自动生效")
+    ap.add_argument("--function-uid", default="", help="可选: 不传=新建记录;传=覆盖更新指定历史记录(场景 A 的 Web 功能 functionUid)")
     ap.add_argument("--session-id", default=None, help="默认取 $HERMES_SESSION_ID")
     ap.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"接口前缀(默认 {DEFAULT_PREFIX})")
     ap.add_argument("--dry-run", action="store_true", help="只打印将执行的请求,不真正调用后端")
@@ -74,13 +76,15 @@ def main() -> int:
     sid = args.session_id or session_id_from_env()
 
     # 元数据校验: 必填且非占位符(displayName/description 缺省兜底是 agent 的事,
-    # 但占位符 xxxx 仍拒绝,防止把假值写进后端;--function-uid 虽被后端忽略,
-    # 占位符同样拒绝,不把垃圾值带进 body)
+    # 但占位符 xxxx 仍拒绝,防止把假值写进后端)
     for label, v in (("projectUid", args.project_uid), ("folderUid", args.folder_uid),
-                     ("displayName", args.display_name), ("relativePath", args.relative_path),
-                     ("functionUid", args.function_uid)):
+                     ("displayName", args.display_name), ("relativePath", args.relative_path)):
         if not v or v.startswith("xxx"):
             die(f"{label} 缺失或为占位符({v!r}),须先向用户确认,不要猜测")
+    # functionUid 可选(后端支持): 空=新建记录;真实值=覆盖更新指定历史记录;
+    # 占位符仍拒绝,不把垃圾值带进 body
+    if args.function_uid and args.function_uid.startswith("xxx"):
+        die(f"functionUid 为占位符({args.function_uid!r}),须先向用户确认,不要猜测")
 
     artifacts = {}
     for art in ("script", "plan", "report"):
@@ -152,7 +156,7 @@ def main() -> int:
     ok, code, msg, data = parse_envelope(resp)
     if not ok:
         die(f"function/save 返回失败 [{code}] {msg}(save 失败不创建记录,带已打印 previewUrl 重试即可)")
-    print(f"[ok] function/save 成功,新建 functionUid={data}")
+    print(f"[ok] function/save 成功,functionUid={data}(新建或覆盖更新,视是否传 --function-uid)")
     return 0
 
 
@@ -173,7 +177,7 @@ def build_body(args, urls: dict, file_names: dict) -> dict:
         ],
     }
     if args.function_uid:
-        body["functionUid"] = args.function_uid  # 预留: 当前后端忽略
+        body["functionUid"] = args.function_uid  # 可选: 传=覆盖更新指定历史记录,不传=新建
     return body
 
 
