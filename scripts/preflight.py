@@ -38,7 +38,7 @@ import sys
 SHARED_ROOT = "/opt/data/e2e"
 BROWSER_PATH = "/opt/hermes/.playwright"
 PYTHON = "/opt/hermes/.venv/bin/python3"
-DEFAULT_SKILL_DIR = "/opt/data/skills/software-development/playwright-e2e-workflow"
+DEFAULT_SKILL_DIR = "/opt/data/skills/playwright-e2e-workflow"
 
 # 物化后应当存在的文件(与 template/ 中的基准配置对应)
 MATERIALIZED = ["playwright.config.ts", "global-setup.ts", "auth.json"]

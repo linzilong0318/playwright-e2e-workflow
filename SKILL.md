@@ -145,7 +145,7 @@ $PY $SKILL_DIR/scripts/upload_artifact.py --type TEST_REPORT --file $E2E_DIR/rep
 ### 阶段 0:环境就绪 + 工作区体检(每轮开头,两场景共用)
 
 ```bash
-SKILL_DIR=/opt/data/skills/software-development/playwright-e2e-workflow
+SKILL_DIR=/opt/data/skills/playwright-e2e-workflow
 PY=/opt/hermes/.venv/bin/python3
 export PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 
