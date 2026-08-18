@@ -27,9 +27,7 @@
   --*-url 只重跑 save,无需重新裸传。
 
 --function-uid 可选(场景 A 的 Web 功能 functionUid):
-  不传/空 = 新建记录(当前默认行为);
-  传真实值 = 覆盖更新该 functionUid 对应的历史记录(后端支持可选,
-  body 带 functionUid 即更新语义)。占位符 xxxx 仍拒绝。
+ 传真实值 = body 透传 functionUid,意图删除该历史记录并新建新记录。占位符 xxxx 仍拒绝。
 
 退出码: 0=成功; 2=参数错误/元数据占位符/上传或 save 失败
 """

@@ -63,8 +63,8 @@ try {
     await page.waitForTimeout(500);
   }
 
-  await page.locator('input[placeholder="请输入用户名"]').fill('dyheyuan');
-  await page.locator('input[placeholder="请输入密码"]').fill('Abc123456');
+  await page.locator('input[placeholder="请输入用户名"]').fill('dylinzl');
+  await page.locator('input[placeholder="请输入密码"]').fill('PsQh314159.');
   await page.waitForTimeout(300);
 
   // slider captcha

@@ -1,7 +1,7 @@
 ---
 name: playwright-e2e-workflow
 description: "端到端 Playwright 测试全流程编排:工作区固定 /opt/data/e2e/<sessionId> 真实目录、preflight 体检、后端拉基准配置物化、login.mjs 登录、probe-*.mjs 探索页面、write_file 写计划与测试、CLI npx playwright test 自验证、产出 json 报告、上传三类产物后清理。两个场景:场景 A「AI生成测试脚本」(裸传 MinIO + function/save 建库,functionUid 可选:空=新建记录,传真实值=覆盖更新历史记录)、场景 B「AI执行并修复已有脚本」(function/resources 下载 + biz 上传整表替换)。用户要求编写/运行/修复 Playwright 测试脚本时加载。"
-version: 6.1.0
+version: 6.2.4
 metadata:
   hermes:
     tags: [playwright, e2e, testing, workflow, cli]
@@ -18,12 +18,12 @@ metadata:
 ## 用户输入解析
 
 - **场景 A 字段**:`projectUid`(项目空间)、`folderUid`(测试目录)、`displayName`(功能名)、`relativePath`(页面相对路径,如 /iotWeb/deviceManage)、`description`(功能描述)、`selectedTestCaseUids`(关联用例)、`selectedResourceUids`(静态资源)、`functionUid`(Web 功能 UID,**可选**)。
-- **场景 A 的 functionUid 双语义**:① 空/缺失 = 新建记录,收尾由 function/save 自动建记录并返回新 functionUid(默认路径);② 提供真实值 = 仍走场景 A 全流程(探索/计划/编写/自验证不变),仅收尾 function/save 时 body 透传 functionUid,本次生成**覆盖更新该历史记录**。占位符 xxxx 仍须先询问。
+- **场景 A 的 functionUid 双语义**:① 空/缺失 = 新建记录,收尾由 function/save 自动建记录并返回新 functionUid(默认路径);② 提供真实值 = 仍走场景 A 全流程(探索/计划/编写/自验证不变),收尾 function/save 时 body 透传 functionUid,意图是**新创建一条记录并根据functionUid删除历史记录**。占位符 xxxx 仍须先询问。
 - **场景 B 字段**:`functionUid`(必填,占位符 xxxx 先询问)。
 - **description 双用途**:① 写计划前先消化它理解功能需求(用例场景设计的主输入);② 透传给 function/save 存库。
 - **relativePath 必填无兜底**:它驱动阶段 2 探索(probe 导航 baseUrl + relativePath),缺失/占位符 → 停下询问用户。
 - **displayName/description 缺失**:先询问用户;确认无法获得时用固定文案——displayName 缺省 `AI自动测试-<relativePath>`、description 缺省 `基于 AI Agent 自动创建的 Playwright 自动化测试脚本`。projectUid/folderUid 缺失必须询问(后端必填,无兜底)。
-- **静态资源失效处理(第一层,写脚本前)**:selectedResourceUids 给了 N 个、fetch_config 过滤返回 M 个——M==0 且 N>0 → 停下询问用户(提供新 uid / 确认跳过上传类用例 / 中止);0<M<N → 打印缺失清单继续。**不要静默跳过下载**,上传类用例无文件可测。
+- **静态资源失效处理(第一层,写脚本前)**:selectedResourceUids 给了 N 个、fetch_config 过滤返回 M 个——M==0 且 N>0 → **先跑 `fetch_config.py --list-resources` 核对近失再问用户**(2026-08-17 实测:用户 uid 抄错一位、项目里真实资源文件名与功能描述吻合 → 确认后按修正 uid 继续,收尾报告显著标注差异;无接近匹配才停下询问,提供新 uid / 确认跳过上传类用例 / 中止);0<M<N → 打印缺失清单继续。**不要静默跳过下载**,上传类用例无文件可测。
 - `操作步骤`/`预期结果`即测试场景来源(正常路径 + 边界/校验失败)。`functionUid` 占位符:场景 A 可选(空=新建);场景 B 必填,缺失/占位符在上传前询问一次。
 - **用例与绑定页面不匹配**:先跑 `scripts/probe-sweep.mjs`(全模块文本扫描)拿"该 UI 不存在"的硬证据,再按可发现功能路线写 plan,范围说明里写明偏差;断言用**真实文案**,不贴合用例断言不存在的文案;最后给用户决策点。
 - `参考资源`(如 *.fig 原型)仅作了解,不下载;静态资源(filePath 是 MinIO URL)也**不在本地下载**,由测试脚本运行时下载(见下)。
@@ -42,7 +42,7 @@ E2E_DIR=/opt/data/e2e/$HERMES_SESSION_ID   # ← 本会话工作区(每轮开头
 
 - `backend.py`:公共库(前缀常量/接口常量/Double-envelope 解析/multipart POST/JSON POST)
 - `preflight.py`:阶段 0 工作区体检(每轮开头必跑,自动同步运行副本)
-- `fetch_config.py`:阶段 1 拉基准配置 + 按 --resource-uids 过滤资源清单 + 打印 filePath(不下载)
+- `fetch_config.py`:阶段 1 拉基准配置 + 按 --resource-uids 过滤资源清单 + 打印 filePath(不下载);`--list-resources` 只列项目全部资源(UID 笔误核对用,不写 template)
 - `fetch_resources.py`:场景 B 阶段 1.5 下载 script/plan/旧 report
 - `publish_artifacts.py`:场景 A 阶段 6 收尾(3×裸传 + function/save,**--function-uid 可选**:空=新建,传=覆盖更新历史记录;支持续传重试)
 - `upload_artifact.py`:场景 B 阶段 6 上传(biz 端点,自动绑定)
@@ -114,7 +114,7 @@ $PY $SKILL_DIR/scripts/upload_artifact.py --type TEST_REPORT --file $E2E_DIR/rep
 - 每个产物二选一:`--*-file <路径>`(裸传)或 `--*-url <previewUrl>`(续传,跳过裸传)。
 - 裸传:`POST {prefix}/file/upload`,multipart **只带 file 字段**(带任何业务参数都 00001,实测);响应 `data.previewUrl` 即 MinIO 地址,拿到立即打印。
 - 建库:`POST {prefix}/api/v1/web-test/function/save`,body = message 元数据透传 + `resourceList:[{resourceType:2/3/4, fileName, filePath:previewUrl}]`;响应 `data` = functionUid。
-- **--function-uid 可选(后端支持,v6.1 实测确认)**:不传/空 = 新建记录,返回新 functionUid;传真实值 = save body 透传 functionUid,**覆盖更新该历史记录**(场景 A 消息的 `Web功能 functionUid` 字段)。占位符 xxxx 仍拒绝(退出码 2)。⚠ 修复前版本把 functionUid 混进必填校验元组,不传必 die——修复版已移除(2026-08-14)。
+- **--function-uid 可选**:不传/空 = 新建记录,返回新 functionUid;传真实值 = save body 透传 functionUid,删除functionUid对应的旧记录,返回新 uid;回查 function/resources 可证。占位符 xxxx 仍拒绝(退出码 2)。
 - **失败语义(实测)**:save 失败(含 00004 参数校验)后端**不创建/不修改记录**,只有成功才落库 → 重试安全;重试把已打印的 previewUrl 传回 `--*-url` 只重跑 save,不重新裸传。
 - `--dry-run`:只打印将执行的请求与 save body,不调后端。
 
@@ -129,7 +129,7 @@ $PY $SKILL_DIR/scripts/upload_artifact.py --type TEST_REPORT --file $E2E_DIR/rep
 ### 5) function/save 接口要点(供 publish_artifacts.py 使用方理解)
 
 - 必填:folderUid、displayName(实测校验顺序 folderUid→displayName);projectUid 文档必填;relativePath/description/selectedTestCaseUids/selectedResourceUids/resourceList 均可选。
-- **functionUid 可选双语义(v6.1)**:不传 = 新建记录,返回新 functionUid;传真实值 = 覆盖更新指定历史记录(场景 A 覆盖语义,2026-08-14 用户确认后端支持)。
+- **functionUid 可选双语义**:不传 = 新建记录,返回新 functionUid;传真实值 = save body 透传 functionUid,后端会根据functionUid对应的历史记录,并新建记录
 - 无删除端点(delete/remove 均路由不存在),误建的 function 记录只能前端手动清理。
 
 ## 核心原则
@@ -162,7 +162,7 @@ export E2E_DIR=/opt/data/e2e/$HERMES_SESSION_ID
 ### 阶段 1:拉取基准配置 + 物化(两场景共用,参数不同)
 
 1. 拉配置:
-   - 场景 A:`$PY $SKILL_DIR/scripts/fetch_config.py --e2e-root $E2E_DIR --resource-uids <selectedResourceUids 逗号分隔>`(消息无静态资源则不传)。M==0 且 N>0 → 停下询问用户。
+   - 场景 A:`$PY $SKILL_DIR/scripts/fetch_config.py --e2e-root $E2E_DIR --resource-uids <selectedResourceUids 逗号分隔>`(消息无静态资源则不传)。M==0 且 N>0 → 按「静态资源失效处理」先 `--list-resources` 核对 UID 笔误,无近匹配再停下询问用户。
    - 场景 B:`$PY $SKILL_DIR/scripts/fetch_config.py --e2e-root $E2E_DIR`(不传资源参数,忽略静态资源)。
    - A05010 = 会话未绑定项目,如实报告并停下询问用户;config/detail 新形态(见接口 1 ⚠)同理。
 2. 物化:`cd $E2E_DIR && node scripts/prepare.mjs`
@@ -194,7 +194,7 @@ $PY $SKILL_DIR/scripts/fetch_resources.py --function-uid <真实UID> --e2e-root 
 
 ### 阶段 3:编写/修改测试(纯 CLI)
 
-- 场景 A:按 plan 手写 `$E2E_DIR/tests/<scenario>.spec.ts`。**代码结构约定**:`describe('<功能名>')` 匹配计划顶层;每个 `test('<场景名>')` 匹配场景标题;步骤注释对应 plan 步骤;定位器严格按已知坑写法(chint 组件系列);正常路径 + 边界 + 校验失败各成 test。
+- 场景 A:按 plan 手写 `$E2E_DIR/tests/<scenario>.spec.ts`。**代码结构约定**:`test.describe('<功能名>')` 匹配计划顶层(Playwright 无裸 `describe` 全局,必须 `test.describe`);每个 `test('<场景名>')` 匹配场景标题;步骤注释对应 plan 步骤;定位器严格按已知坑写法(chint 组件系列);正常路径 + 边界 + 校验失败各成 test。
 - 场景 B:在下载的 `tests/<原名>.spec.ts` 上**修改修复**(基于原脚本修 bug,不是从零重写);修复范围以旧 plan 用例意图 + 旧 report 失败点为据。
 - 定位器拿不准时回阶段 2 补 probe。
 - 写完 `cd $E2E_DIR && npx playwright test --list` 确认测试被加载。
@@ -220,8 +220,8 @@ cd $E2E_DIR && PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright npx playwright t
 - **场景 A**(生成,functionUid 可选):收集 `tests/*.spec.ts`(TEST_SCRIPT)、`specs/*.plan.md`(TEST_PLAN)、`report/test-results.json`(TEST_REPORT),调一次 `publish_artifacts.py`(三个产物文件路径 + message 元数据)。**--function-uid 仅在 message 提供真实值(需覆盖历史记录)时传,不传 = 新建**。校验退出码 0 且打印 functionUid(新建或覆盖更新)。**失败重试:把已打印的 previewUrl 传回 `--*-url`,只重跑 save**。
   - publish 被后端 00001 阻塞时:不跑 cleanup,保留 tests/specs/report 产物,如实报告后端故障,待恢复后重跑本阶段再清理。
 - **场景 B**(修复,有 functionUid):只上传修复后的脚本 + 新报告,biz 端点各调一次 `upload_artifact.py`(type=TEST_SCRIPT / TEST_REPORT,`--function-uid` 从 message 取;按类型整表替换,自动绑定,无需 function/save)。**plan 不上传、旧 report 不上传**。
-- 清理:`cd $E2E_DIR && node scripts/cleanup.mjs`(保留 template/scripts/login.mjs/seed.spec.ts/auth.json;场景 B 下载的旧脚本/plan/旧 report 一并清)。
-- 彻底重置:`cd $E2E_DIR && node scripts/cleanup.mjs --all`(连 auth.json 一起删;多用户下会话结束建议清理)。
+- 清理:`cd $E2E_DIR && node scripts/cleanup.mjs`(**清空 session 目录全部文件,仅留空目录**)。cleanup 带路径守卫(仅允许 `/e2e/<会话id>` 形态目录,误跑直接拒绝退出 2)。`--all` 参数保留但为 no-op(新语义本就全清)。
+- 彻底重置:同 cleanup(全清即彻底);多用户下会话结束建议执行一次。
 
 ## 已知坑(必读)
 
@@ -231,13 +231,6 @@ cd $E2E_DIR && PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright npx playwright t
 - chint 组件通用交互坑:下拉面板/虚拟滚动表格/分页器/搜索空态/表单校验错误
 - 物化与运行环境坑:CR-only 行尾、node_modules 解析、浏览器归一化、--reporter 覆盖
 - 后端接口坑(v6):双上传端点并存(裸传只认 file / biz 按类型整表替换)、save functionUid 可选双语义(空=新建,传=覆盖)、resourceList 过滤、无删除端点、00001 排查法、A05010 会话未绑定
-
-## 架构历史(方案 B 迁移记录)
-
-- **6.1(2026-08-14):场景 A 支持 functionUid 覆盖更新**。场景 A 消息新增可选 `Web功能 functionUid` 字段:空 = 新建记录(默认);真实值 = 仍走场景 A 全流程,收尾 function/save body 透传 functionUid,覆盖更新该历史记录。publish_artifacts.py 修复 functionUid 必填校验 bug(原把 functionUid 混进必填元组,不传必 die;后端实际支持可选,2026-08-14 用户确认)。
-- **6.0(2026-08-13):双场景 + 新后端接口**。场景 A(生成)收尾改为 裸传 `/file/upload`(只认 file 字段,返回 previewUrl)→ `function/save`(纯创建,透传 message 元数据 + resourceList 2/3/4),不再需要 functionUid;静态资源不再本地下载,由测试脚本运行时下载到脚本同目录(多环境通用);config/detail 新增重复 resourceList 参数按 resourceUid 过滤。场景 B(修复)新增:`function/resources` 下载 script/plan/旧 report,修复后 biz 端点 `/api/v1/file/upload` 上传(实测按类型整表替换,同名/不同名都替换整个列表),自动绑定 functionUid。全部接口形态 2026-08-13 实测确认。
-- **5.0(2026-08-13):移除 playwright-test MCP,纯 CLI**。工作区固定 `/opt/data/e2e/<sid>` 真实目录。删除 watchdog pid 目录、ppid 链自发现、指针文件、run-test-mcp.sh。探索用 probe-*.mjs;写计划/测试用 write_file;验证用 CLI。动机:ppid 链自发现依赖 hermes 进程模型(8/12 与 8/13 实测形态不同,模型会漂移),gateway 多会话并发下存在"选错 watchdog"的必然失效模式;CLI 路径只依赖 sid 注入(契约行为),隔离一眼看穿。
-- **4.x(2026-08-12~13):watchdog pid 目录 + ppid 链自发现**。历史机制仅作参考,不再适用。
 
 ## 验证
 
@@ -249,4 +242,4 @@ cd $E2E_DIR && PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright npx playwright t
 - 场景 B:fetch_resources.py 退出码 0,`tests/` 有旧脚本、`report/prev-test-results.json` 存在
 - `$E2E_DIR/report/test-results.json` 存在且 stats.expected > 0
 - 场景 A:publish_artifacts.py 退出码 0 且打印 functionUid(新建或覆盖;传 --function-uid 后回查该 functionUid 的 resources 确认被更新);场景 B:两个 upload_artifact.py 各返回退出码 0 且 data.url 非空
-- cleanup 后 `$E2E_DIR` 只剩:template/ scripts/ login.mjs seed.spec.ts auth.json
+- cleanup 后 `$E2E_DIR` 为**空目录**(仅保留空的 session 目录;contents 由 preflight/fetch_config/prepare/login 下次重建)

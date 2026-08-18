@@ -4,6 +4,7 @@
 用法:
   fetch_config.py [--session-id <sid>] [--prefix <base>] [--e2e-root <dir>]
                   [--resource-uids uid1,uid2 ...]
+                  [--list-resources]           # 只列项目全部资源(核对 resourceUid 近失),不写 template
 
 行为:
   1. GET {prefix}/api/v1/web-test/config/detail?sessionId={sid}[&resourceList=...]
@@ -13,9 +14,12 @@
   3. 静态资源**不下载**: 打印返回资源的 fileName+filePath 清单,由 agent 写进测试
      脚本,测试运行时下载到脚本同目录(多环境通用,路径不落死)
   4. 资源防护(第一层): --resource-uids 给了 N 个、过滤返回 M 个:
-       N>0 且 M==0 → 退出码 2,提示 agent 询问用户(占位符/已失效;上传类用例
-       无文件可测,不能静默跳过,也不能伪造资源)
+       N>0 且 M==0 → 退出码 2,提示 agent 先跑 --list-resources 核对近失
+        (2026-08-17 实测:用户 uid 可能抄错一位,列全量后按文件名与功能描述吻合度确认修正),
+        无接近匹配再询问用户;上传类用例无文件可测,不能静默跳过,也不能伪造资源
        0<M<N → WARN 打印缺失清单,继续(点名缺失文件的上传用例会在自验证暴露)
+  5. --list-resources: 只打印项目全部静态资源(uid/fileName/filePath),不写 template,
+     退出码 0 —— 用于 resourceUid 未命中时核对近失/查找真实 uid
 
 退出码: 0=成功; 2=会话未绑定项目/网络错误/参数错误/资源全部失效
 """
@@ -55,6 +59,8 @@ def main() -> int:
                     help="会话工作区根目录(默认 /opt/data/e2e/<HERMES_SESSION_ID>)")
     ap.add_argument("--resource-uids", default="",
                     help="逗号分隔的 selectedResourceUids(场景 A 静态资源),以重复 resourceList 参数过滤")
+    ap.add_argument("--list-resources", action="store_true",
+                    help="只列出项目全部静态资源(不写 template),用于核对 resourceUid 近失/查找真实 uid")
     args = ap.parse_args()
 
     sid = args.session_id or session_id_from_env()
@@ -80,6 +86,13 @@ def main() -> int:
         # A05010 = 会话未绑定项目
         die(f"config/detail 返回失败 [{code}] {msg}(会话未绑定项目时如实报告)")
 
+    if args.list_resources:
+        resources = data.get("resourceList") or []
+        print(f"[ok] 项目资源共 {len(resources)} 项:")
+        for r in resources:
+            print(f"  {r.get('resourceUid')}  {r.get('fileName')}  {r.get('filePath')}")
+        return 0
+
     # 写 template 文件
     with open(os.path.join(template_dir, "playwright.config.ts"), "w") as f:
         f.write(data["playwrightConfig"])
@@ -96,7 +109,7 @@ def main() -> int:
             print(f"     - fileName={r.get('fileName')} resourceUid={r.get('resourceUid')}")
             print(f"       filePath={r.get('filePath')}  <- 写进测试脚本,运行时下载到脚本同目录")
         if len(resources) == 0:
-            die("--resource-uids 全部未命中(占位符或已失效): 上传类用例无文件可测,须询问用户提供新 uid 或确认跳过;不要伪造资源")
+            die("--resource-uids 全部未命中(占位符或已失效): 先跑 --list-resources 核对近失(如 uid 抄错一位、文件名与功能描述吻合),确认后按修正 uid 重跑;无接近匹配再询问用户;上传类用例无文件可测,不要伪造资源")
         if len(resources) < len(uids):
             got = {r.get("resourceUid") for r in resources}
             missing = [u for u in uids if u not in got]

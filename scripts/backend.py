@@ -25,7 +25,7 @@ DEFAULT_PREFIX = "http://10.120.132.36:8005/ai-test"
 # ---- 后端接口常量(v6:五类接口,见 SKILL.md「后端接口」) ----
 API_CONFIG_DETAIL = "/api/v1/web-test/config/detail"      # 拉基准配置(可带重复 resourceList 过滤)
 API_FUNCTION_RESOURCES = "/api/v1/web-test/function/resources"  # 场景 B:按 functionUid 取脚本/计划/报告
-API_FUNCTION_SAVE = "/api/v1/web-test/function/save"       # 场景 A:同步数据库(functionUid 可选:空=新建,传=覆盖更新历史记录,见 publish_artifacts.py)
+API_FUNCTION_SAVE = "/api/v1/web-test/function/save"       # 场景 A:同步数据库(functionUid 可选:空=新建,传=删除历史记录并新建,见 publish_artifacts.py)
 API_UPLOAD_RAW = "/file/upload"           # 裸 MinIO 上传(只认 file 字段,带业务参数即 00001)
 API_UPLOAD_BIZ = "/api/v1/file/upload"    # 业务上传(query type/sessionId/functionUid,按类型整表替换)
 
