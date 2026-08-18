@@ -122,7 +122,7 @@ $PY $SKILL_DIR/scripts/upload_artifact.py --type TEST_REPORT --file $E2E_DIR/rep
 
 - `POST {prefix}/api/v1/file/upload`,query: `type`/`sessionId`/`functionUid` + multipart `file`;type 枚举 `TEST_SCRIPT`/`TEST_PLAN`/`TEST_REPORT`。
 - **按类型整表替换(实测)**:上传 TEST_SCRIPT 即清空并替换整个 scriptList,与文件名无关;TEST_PLAN/TEST_REPORT 同理各自隔离 → 修复后同名上传新脚本即覆盖旧脚本,不会出现新旧两条。
-- 自动绑定 functionUid(relativePath 含 /webtest/resources/<uid></uid>/),**无需 function/save**。
+- 自动绑定 functionUid(relativePath 含 /webtest/resources/<uid>/),**无需 function/save**。
 - 成功判定:success==true 或 code=="200",且 `data.url` 非空;`functionUid` 从 message 取,占位符直接拒绝退出。
 - 退出码 2:业务层 `{"success":false,"code":"00001",...}`(HTTP 200)按 pitfalls 排查法处理,如实报告,不伪造 url。
 
