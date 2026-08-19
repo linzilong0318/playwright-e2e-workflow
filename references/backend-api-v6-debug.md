@@ -1,8 +1,10 @@
 # 后端接口 v6 调试实测记录(2026-08-13,curl 直接探测)
 
 > 前缀 http://10.120.132.36:8005/ai-test;envelope 兼容 {code,msg} 与 {success,message}。
+> 注(2026-08-19): 脚本前缀已改为 Nacos 动态发现(nacos-sdk-python,BACKEND_SERVICE_NAME 默认 ai-test),
+> 失败回退固定地址 10.120.7.97:8005/ai-test;可 --prefix 显式覆盖。本页实测记录为历史调试依据,保持原样。
 > 本文件是 v6.0 改版设计(两场景:AI 生成测试脚本 / AI 执行并修复已有脚本)的接口依据;
-> 实测用 sessionId=session_48a381732b33418fbb481ca82e4586f2(已绑定项目)、functionUid=2084556509673521152。
+
 
 ## GET /api/v1/web-test/config/detail
 - 参数:sessionId 必填(用 $HERMES_SESSION_ID);**重复 resourceList=<resourceUid> 可选,按 resourceUid 过滤(OR 语义)**

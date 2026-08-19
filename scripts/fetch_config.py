@@ -32,7 +32,7 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend import (  # noqa: E402
-    API_CONFIG_DETAIL, DEFAULT_PREFIX, die, http_get, parse_envelope,
+    API_CONFIG_DETAIL, die, http_get, parse_envelope, resolve_backend_prefix,
     session_id_from_env,
 )
 
@@ -54,7 +54,8 @@ def extract_base_url(cfg_text: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="拉取后端基准配置到 template/(v6:不下载静态资源)")
     ap.add_argument("--session-id", default=None, help="默认取 $HERMES_SESSION_ID")
-    ap.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"接口前缀(默认 {DEFAULT_PREFIX})")
+    ap.add_argument("--prefix", default=None,
+                    help="接口前缀(默认 Nacos 动态发现,失败回退固定地址;显式传则覆盖)")
     ap.add_argument("--e2e-root", default=default_e2e_root(),
                     help="会话工作区根目录(默认 /opt/data/e2e/<HERMES_SESSION_ID>)")
     ap.add_argument("--resource-uids", default="",
@@ -64,11 +65,12 @@ def main() -> int:
     args = ap.parse_args()
 
     sid = args.session_id or session_id_from_env()
+    prefix = args.prefix or resolve_backend_prefix()
     template_dir = os.path.join(args.e2e_root, "template")
     os.makedirs(template_dir, exist_ok=True)
 
     uids = [u.strip() for u in args.resource_uids.split(",") if u.strip()]
-    url = f"{args.prefix}{API_CONFIG_DETAIL}?sessionId={urllib.parse.quote(sid)}"
+    url = f"{prefix}{API_CONFIG_DETAIL}?sessionId={urllib.parse.quote(sid)}"
     for u in uids:
         url += f"&resourceList={urllib.parse.quote(u)}"
     try:

@@ -1,7 +1,7 @@
 ---
 name: playwright-e2e-workflow
 description: "端到端 Playwright 测试全流程编排:工作区固定 /opt/data/e2e/<sessionId> 真实目录、preflight 体检、后端拉基准配置物化、login.mjs 登录、probe-*.mjs 探索页面、write_file 写计划与测试、CLI npx playwright test 自验证、产出 json 报告、上传三类产物后清理。两个场景:场景 A「AI生成测试脚本」(裸传 MinIO + function/save 建库,functionUid 可选:空=新建记录,传真实值=覆盖更新历史记录)、场景 B「AI执行并修复已有脚本」(function/resources 下载 + biz 上传整表替换)。用户要求编写/运行/修复 Playwright 测试脚本时加载。"
-version: 6.2.4
+version: 7.0.0
 metadata:
   hermes:
     tags: [playwright, e2e, testing, workflow, cli]
@@ -28,6 +28,9 @@ metadata:
 - **用例与绑定页面不匹配**:先跑 `scripts/probe-sweep.mjs`(全模块文本扫描)拿"该 UI 不存在"的硬证据,再按可发现功能路线写 plan,范围说明里写明偏差;断言用**真实文案**,不贴合用例断言不存在的文案;最后给用户决策点。
 - `参考资源`(如 *.fig 原型)仅作了解,不下载;静态资源(filePath 是 MinIO URL)也**不在本地下载**,由测试脚本运行时下载(见下)。
 
+## 安全要求
+给用户流式返回的内容中尽量不要出现Uid等含有隐私信息的元数据（工具调用信息除外）
+
 ## 目录结构(方案 B:工作区 = sid 真实目录)
 
 **会话工作区 = /opt/data/e2e/<HERMES_SESSION_ID>**。sid 由 hermes 显式注入 terminal 子进程环境;多会话并发各用各的目录。**场景 B 由前端触发新会话 → 全新 sid 目录,天然无覆盖问题**。
@@ -40,7 +43,7 @@ E2E_DIR=/opt/data/e2e/$HERMES_SESSION_ID   # ← 本会话工作区(每轮开头
 
 技能自带脚本(本 SKILL.md 所在目录 `scripts/`,**权威副本**,后端交互/物化逻辑全部走这里,勿改逻辑):
 
-- `backend.py`:公共库(前缀常量/接口常量/Double-envelope 解析/multipart POST/JSON POST)
+- `backend.py`:公共库(Nacos 动态发现前缀 resolve_backend_prefix / 接口常量 / Double-envelope 解析 / multipart POST / JSON POST)
 - `preflight.py`:阶段 0 工作区体检(每轮开头必跑,自动同步运行副本)
 - `fetch_config.py`:阶段 1 拉基准配置 + 按 --resource-uids 过滤资源清单 + 打印 filePath(不下载);`--list-resources` 只列项目全部资源(UID 笔误核对用,不写 template)
 - `fetch_resources.py`:场景 B 阶段 1.5 下载 script/plan/旧 report
@@ -70,9 +73,12 @@ E2E_DIR=/opt/data/e2e/$HERMES_SESSION_ID   # ← 本会话工作区(每轮开头
     └── test-results/              # 生成物:playwright 运行产物(上传后清)
 ```
 
-## 后端接口(闭环数据源,v6)
+## 后端接口(闭环数据源)
 
-- 接口前缀**固定** `http://10.120.132.36:8005/ai-test`(backend.py `DEFAULT_PREFIX`;临时换环境用 `--prefix` 覆盖)。
+- 接口前缀**默认经 Nacos 动态发现**(nacos-sdk-python 1.0.0,容器标准),失败回退固定地址 `http://10.120.7.97:8005/ai-test`(backend.py `DEFAULT_PREFIX`;临时换环境用 `--prefix` 显式覆盖)。
+- **前缀解析优先级**:显式 `--prefix` > Nacos 动态发现 > 固定地址回退。发现失败时脚本打印 `[warn]` 但**正常回退继续**,勿误判为后端故障。
+- **Nacos 环境变量(容器启动注入;backend.py `NACOS_DEFAULTS` 内置默认值,未注入也可用)**:`NACOS_SERVER_ADDRESSES`(默认 `10.120.7.97:8848`)、`NACOS_NAMESPACE`(默认空)、`NACOS_USERNAME`(默认 `nacos`)、`NACOS_PASSWORD`、`NACOS_GROUP_NAME`(默认 `DEFAULT_GROUP`)、`BACKEND_SERVICE_NAME`(默认 `ai-test`,既是服务名也是 URL 路径前缀)。
+- 调试逃生舱:`NACOS_DISABLED=1` 跳过 Nacos 直接走固定地址。
 - envelope 兼容两种:`{code, msg}` 与 `{success, message}`;成功判定:`code=="200"` 或 `success==true`(v6 实测接口均返回 success=true + code=00000)。
 - **所有接口交互走技能自带 Python 脚本**,不用 curl heredoc:
 
@@ -94,7 +100,7 @@ $PY $SKILL_DIR/scripts/upload_artifact.py --type TEST_REPORT --file $E2E_DIR/rep
 
 > **bash 坑:不要用 `UID` 作 shell 变量名**(`UID` 是 bash 内置只读变量,赋值静默失败并报 readonly variable)。用 `FUID` 等名字,赋值后先 `echo` 确认再上传;上传后核对返回的 relativePath 含真实 functionUid(形如 `/webtest/resources/<真实UID>/...`)。
 
-### 1) fetch_config.py(拉基准配置,v6)
+### 1) fetch_config.py(拉基准配置)
 
 - `GET {prefix}/api/v1/web-test/config/detail?sessionId={sid}[&resourceList=uid...]`;`sessionId` 直接用 `$HERMES_SESSION_ID`,无需用户提供。
 - `--resource-uids` 以**重复 resourceList 查询参数**按 resourceUid 过滤(OR 语义,实测确认),对应场景 A 的 selectedResourceUids;**不传 = 返回项目全部资源**(场景 B 即如此,忽略静态资源)。
@@ -102,14 +108,13 @@ $PY $SKILL_DIR/scripts/upload_artifact.py --type TEST_REPORT --file $E2E_DIR/rep
 - 退出码 2:`A05010 未找到该会话绑定的项目数据` = 会话未绑定项目,如实报告停下询问;或 `--resource-uids 全部未命中` = 资源全失效/占位符,停下询问用户(不能伪造资源)。
 - ⚠ v6.1 已知:config/detail 存在新形态(success=true 但 data 仅 {resourceList:[]},无 playwrightConfig/globalSetup)= 绑定项目无基准配置模板或绑定静默失败,**不是 A05010**;fetch_config.py 遇此形态会 KeyError 崩溃(未兜底)。判别法:curl 历史跑通的 sessionId 对照(返回三字段=接口正常)。处理:如实报告、停下询问用户、不伪造配置。
 
-### 2) fetch_resources.py(场景 B 下载,v6 新增)
+### 2) fetch_resources.py(场景 B 下载)
 
 - `GET {prefix}/api/v1/web-test/function/resources?functionUid={uid}` → `data:{functionUid, scriptList, testPlanList, testReportList}`,每项 `{webResourceUid, functionUid, resourceType(2/3/4), resourceUid, fileName, filePath}`。
 - 下载:script → `tests/<原名>`(修复对象)、plan → `specs/<原名>`(仅对齐用例意图,不上传不保留)、report → `report/prev-test-results.json`(仅修复参考,直接丢弃)。
-- ⚠ 下载 fileName 可能为 undefined(落盘 `tests/undefined`,playwright 默认 testMatch 只加载 *.spec.ts,直接跑不会加载它):`mv tests/undefined tests/<规范名>.spec.ts` 再跑;上传时后端 fileName 恢复正确。
 - 退出码 2:functionUid 无效 / **该 function 无测试脚本(无法修复)** / 网络错误。
 
-### 3) publish_artifacts.py(场景 A 收尾,v6.1 修复)
+### 3) publish_artifacts.py(场景 A 收尾)
 
 - 每个产物二选一:`--*-file <路径>`(裸传)或 `--*-url <previewUrl>`(续传,跳过裸传)。
 - 裸传:`POST {prefix}/file/upload`,multipart **只带 file 字段**(带任何业务参数都 00001,实测);响应 `data.previewUrl` 即 MinIO 地址,拿到立即打印。
@@ -122,7 +127,7 @@ $PY $SKILL_DIR/scripts/upload_artifact.py --type TEST_REPORT --file $E2E_DIR/rep
 
 - `POST {prefix}/api/v1/file/upload`,query: `type`/`sessionId`/`functionUid` + multipart `file`;type 枚举 `TEST_SCRIPT`/`TEST_PLAN`/`TEST_REPORT`。
 - **按类型整表替换(实测)**:上传 TEST_SCRIPT 即清空并替换整个 scriptList,与文件名无关;TEST_PLAN/TEST_REPORT 同理各自隔离 → 修复后同名上传新脚本即覆盖旧脚本,不会出现新旧两条。
-- 自动绑定 functionUid(relativePath 含 /webtest/resources/<uid>/),**无需 function/save**。
+- 自动绑定 functionUid(relativePath 含 /webtest/resources/<uid></uid>/),**无需 function/save**。
 - 成功判定:success==true 或 code=="200",且 `data.url` 非空;`functionUid` 从 message 取,占位符直接拒绝退出。
 - 退出码 2:业务层 `{"success":false,"code":"00001",...}`(HTTP 200)按 pitfalls 排查法处理,如实报告,不伪造 url。
 
@@ -140,7 +145,7 @@ $PY $SKILL_DIR/scripts/upload_artifact.py --type TEST_REPORT --file $E2E_DIR/rep
 4. **CLI 验证时不要传 `--reporter=list`**,会覆盖配置里的 json reporter,导致 report/ 不生成。
 5. **输出务必精简**:probe dump 的 JSON 可能较大,优先 `--out` 落盘后按需读取关键字段;每轮 response 优先执行工具调用,文字分析精简到最少。
 6. **Python 解释器固定 `/opt/hermes/.venv/bin/python3`**(uv 全局环境,`uv python find` 确认):所有 python 调用(脚本/内联)一律用绝对路径,不依赖 PATH 里的裸 `python3`;该路径若失效,用 `uv python find` 重新确认后再改。
-7. **后端交互不手写 curl/heredoc**:一律调用技能 `scripts/` 下的固化脚本(fetch_config.py / fetch_resources.py / publish_artifacts.py / upload_artifact.py),参数、envelope 解析、退出码语义已固化。
+7. **后端交互不手写 curl/heredoc**:一律调用技能 `scripts/` 下的固化脚本(fetch_config.py / fetch_resources.py / publish_artifacts.py / upload_artifact.py),参数、envelope 解析、退出码语义已固化;前缀解析(含 Nacos 发现与回退)已固化在 backend.py,无需 agent 手工处理。
 8. **每轮流程开头必跑 preflight.py 体检工作区**(自动:同步运行副本脚本、按 sid 启动会话 Xvfb、初始化共享 node_modules):阻塞项(FAIL)先修复再继续;提示项(WARN/info)按需处理。
 9. **运行副本脚本只读、不手工改**:每轮 preflight 强制从技能目录覆盖同步,手工改动会被覆盖;要改脚本逻辑直接改技能目录权威副本。
 
@@ -230,7 +235,7 @@ cd $E2E_DIR && PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright npx playwright t
 - 页面探索与登录:中文界面、登录滑块、单点登录互踢、模块级路由 404 菜单壳陷阱
 - chint 组件通用交互坑:下拉面板/虚拟滚动表格/分页器/搜索空态/表单校验错误
 - 物化与运行环境坑:CR-only 行尾、node_modules 解析、浏览器归一化、--reporter 覆盖
-- 后端接口坑(v6):双上传端点并存(裸传只认 file / biz 按类型整表替换)、save functionUid 可选双语义(空=新建,传=覆盖)、resourceList 过滤、无删除端点、00001 排查法、A05010 会话未绑定
+- 后端接口坑(v6):前缀经 Nacos 动态发现(失败自动回退固定地址,`[warn]` 非故障;`--prefix`/`NACOS_DISABLED` 可强制)、双上传端点并存(裸传只认 file / biz 按类型整表替换)、save functionUid 可选双语义(空=新建,传=覆盖)、resourceList 过滤、无删除端点、00001 排查法、A05010 会话未绑定
 
 ## 验证
 

@@ -1,8 +1,9 @@
 #!/opt/hermes/.venv/bin/python3
-"""playwright-e2e-workflow 后端接口公共库(纯 stdlib)。
+"""playwright-e2e-workflow 后端接口公共库(纯 stdlib + nacos-sdk-python 可选)。
 
 供 fetch_config.py / upload_artifact.py 复用:
-- 接口前缀常量(固定 http://10.120.132.36:8005/ai-test,可 --prefix 覆盖)
+- 接口前缀: 默认通过 Nacos 动态发现(nacos-sdk-python),失败回退固定地址
+  DEFAULT_PREFIX(可 --prefix 显式覆盖,见 resolve_backend_prefix)
 - 兼容两种响应 envelope: {code,msg}(文档示例) 与 {success,message}(实测)
   成功判定: code=="200" 或 success==true
 - HTTP GET / multipart POST(不依赖 requests)
@@ -20,7 +21,95 @@ mimetypes.add_type("application/json", ".json")
 mimetypes.add_type("text/markdown", ".md")
 mimetypes.add_type("text/plain", ".ts")
 
-DEFAULT_PREFIX = "http://10.120.132.36:8005/ai-test"
+DEFAULT_PREFIX = "http://10.120.7.97:8005/ai-test"  # 回退前缀(Nacos 发现失败时使用)
+
+# ---- Nacos 服务发现(前缀动态化,失败回退 DEFAULT_PREFIX) ----
+# 环境变量可覆盖;默认值与经用户验证的 discover_and_call.py 参考脚本一致。
+NACOS_DEFAULTS = {
+    "NACOS_SERVER_ADDRESSES": "10.120.7.97:8848",
+    "NACOS_NAMESPACE": "",
+    "NACOS_USERNAME": "nacos",
+    "NACOS_PASSWORD": "",
+    "NACOS_GROUP_NAME": "DEFAULT_GROUP",
+    "BACKEND_SERVICE_NAME": "ai-test",  # 既是 Nacos 服务名,也是 URL 路径前缀(容器启动注入,默认 ai-test)
+}
+NACOS_TIMEOUT_SECONDS = 5  # 有界超时:Nacos 不可达时快速回退,避免长时间挂起
+
+_backend_prefix_cache = None
+
+
+def resolve_backend_prefix(force: bool = False) -> str:
+    """解析后端接口前缀(形如 http://ip:port/ai-test)。
+
+    优先级: 显式 --prefix(调用方处理)> Nacos 动态发现 > DEFAULT_PREFIX 回退。
+    - 成功结果缓存本次进程(force=True 强制重新发现);
+    - NACOS_DISABLED=1 直接跳过 Nacos 走固定地址(调试逃生舱);
+    - Nacos 发现失败(包未装/连不上/无健康实例)时打印 [warn] 并回退,不退出。
+    """
+    global _backend_prefix_cache
+    if _backend_prefix_cache and not force:
+        return _backend_prefix_cache
+
+    if os.environ.get("NACOS_DISABLED"):
+        print(f"[info] NACOS_DISABLED=1,跳过 Nacos,使用固定前缀 {DEFAULT_PREFIX}")
+        base = DEFAULT_PREFIX
+    else:
+        try:
+            base = _discover_via_nacos()
+            print(f"[info] Nacos 发现后端前缀: {base}")
+        except Exception as e:
+            print(f"[warn] Nacos 服务发现失败({e}),回退固定前缀 {DEFAULT_PREFIX}", file=sys.stderr)
+            base = DEFAULT_PREFIX
+
+    _backend_prefix_cache = base
+    return base
+
+
+def _discover_via_nacos() -> str:
+    """通过 Nacos 发现后端服务,返回 http://{ip}:{port}/{service_name}。
+
+    - 懒导入 nacos: 未安装抛 ImportError,由 resolve_backend_prefix 捕获后回退;
+    - 无健康实例/实例缺 ip 抛 RuntimeError;
+    - 用 socket.setdefaulttimeout 做有界超时(对底层 requests/urllib3 生效),保证快速回退。
+    """
+    import socket
+
+    import nacos  # 懒导入:未安装抛 ImportError → 触发回退
+    # 注意: nacos-sdk-python 3.x 起 API 重构(v2.nacos,构造参数与方法完全不同);
+    # 容器统一使用 1.0.0(实测兼容),本代码按 1.0.0 接口(NacosClient(server_addresses=...)
+    # + list_naming_instance(service, group_name=...))编写;若为 3.x 会在此抛异常并回退固定地址。
+
+    server = os.environ.get("NACOS_SERVER_ADDRESSES") or NACOS_DEFAULTS["NACOS_SERVER_ADDRESSES"]
+    namespace = os.environ.get("NACOS_NAMESPACE") or NACOS_DEFAULTS["NACOS_NAMESPACE"]
+    username = os.environ.get("NACOS_USERNAME") or NACOS_DEFAULTS["NACOS_USERNAME"]
+    password = os.environ.get("NACOS_PASSWORD") or NACOS_DEFAULTS["NACOS_PASSWORD"]
+    group = os.environ.get("NACOS_GROUP_NAME") or NACOS_DEFAULTS["NACOS_GROUP_NAME"]
+    service = os.environ.get("BACKEND_SERVICE_NAME") or NACOS_DEFAULTS["BACKEND_SERVICE_NAME"]
+
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(NACOS_TIMEOUT_SECONDS)
+    try:
+        client = nacos.NacosClient(
+            server_addresses=server,
+            namespace=namespace,
+            username=username,
+            password=password,
+        )
+        instances = client.list_naming_instance(service, group_name=group)
+    finally:
+        socket.setdefaulttimeout(old_timeout)
+
+    hosts = (instances or {}).get("hosts") or []
+    healthy = [h for h in hosts if h.get("healthy", False)]
+    if not healthy:
+        raise RuntimeError(f"服务 {service} 无健康实例({len(hosts)} 个实例均不健康)")
+    inst = healthy[0]
+    ip = inst.get("ip") or inst.get("host") or ""
+    port = inst.get("port", 8080)
+    if not ip:
+        raise RuntimeError(f"服务 {service} 健康实例缺少 ip 字段")
+    return f"http://{ip}:{port}/{service}"
+
 
 # ---- 后端接口常量(v6:五类接口,见 SKILL.md「后端接口」) ----
 API_CONFIG_DETAIL = "/api/v1/web-test/config/detail"      # 拉基准配置(可带重复 resourceList 过滤)

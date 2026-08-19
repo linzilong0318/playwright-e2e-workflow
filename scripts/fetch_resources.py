@@ -24,7 +24,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend import (  # noqa: E402
-    API_FUNCTION_RESOURCES, DEFAULT_PREFIX, die, http_get, parse_envelope,
+    API_FUNCTION_RESOURCES, die, http_get, parse_envelope, resolve_backend_prefix,
 )
 
 
@@ -48,14 +48,16 @@ def main() -> int:
     ap.add_argument("--function-uid", required=True,
                     help="Web 功能 UID(message 提供;占位符须先向用户确认)")
     ap.add_argument("--session-id", default=None, help="默认取 $HERMES_SESSION_ID")
-    ap.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"接口前缀(默认 {DEFAULT_PREFIX})")
+    ap.add_argument("--prefix", default=None,
+                    help="接口前缀(默认 Nacos 动态发现,失败回退固定地址;显式传则覆盖)")
     ap.add_argument("--e2e-root", default=default_e2e_root(), help="会话工作区根目录")
     args = ap.parse_args()
 
     if not args.function_uid or args.function_uid.startswith("xxxx"):
         die(f"functionUid 不是真实值({args.function_uid!r}),须先向用户确认,不要猜测")
 
-    url = f"{args.prefix}{API_FUNCTION_RESOURCES}?functionUid={urllib.parse.quote(args.function_uid)}"
+    prefix = args.prefix or resolve_backend_prefix()
+    url = f"{prefix}{API_FUNCTION_RESOURCES}?functionUid={urllib.parse.quote(args.function_uid)}"
     try:
         status, body = http_get(url)
     except urllib.error.URLError as e:

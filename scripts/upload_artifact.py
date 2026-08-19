@@ -22,7 +22,8 @@ import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend import (  # noqa: E402
-    DEFAULT_PREFIX, die, http_post_multipart, parse_envelope, session_id_from_env,
+    die, http_post_multipart, parse_envelope, resolve_backend_prefix,
+    session_id_from_env,
 )
 
 API_UPLOAD = "/api/v1/file/upload"
@@ -36,7 +37,8 @@ def main() -> int:
     ap.add_argument("--session-id", default=None, help="默认取 $HERMES_SESSION_ID")
     ap.add_argument("--function-uid", required=True,
                     help="前端预创建分配的 Web 功能 UID(真实值,占位符需先向用户确认)")
-    ap.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"接口前缀(默认 {DEFAULT_PREFIX})")
+    ap.add_argument("--prefix", default=None,
+                    help="接口前缀(默认 Nacos 动态发现,失败回退固定地址;显式传则覆盖)")
     ap.add_argument("--form-mode", action="store_true",
                     help="强制参数放 form 字段(默认 query 失败后自动降级)")
     args = ap.parse_args()
@@ -47,7 +49,8 @@ def main() -> int:
     if not args.function_uid or args.function_uid.startswith("xxxx"):
         die(f"functionUid 不是真实值({args.function_uid!r}),须向用户确认后再上传,不要猜测")
 
-    url = f"{args.prefix}{API_UPLOAD}"
+    prefix = args.prefix or resolve_backend_prefix()
+    url = f"{prefix}{API_UPLOAD}"
     query_params = {"type": args.type, "sessionId": sid, "functionUid": args.function_uid}
     form_params = dict(query_params)  # 降级模式: 参数放 form 字段
 

@@ -40,8 +40,8 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend import (  # noqa: E402
-    API_FUNCTION_SAVE, API_UPLOAD_RAW, DEFAULT_PREFIX, die,
-    http_post_json, http_post_multipart, parse_envelope, session_id_from_env,
+    API_FUNCTION_SAVE, API_UPLOAD_RAW, die, http_post_json, http_post_multipart,
+    parse_envelope, resolve_backend_prefix, session_id_from_env,
 )
 
 RESOURCE_TYPE = {"script": 2, "plan": 3, "report": 4}
@@ -67,11 +67,13 @@ def main() -> int:
     ap.add_argument("--resource-uids", default="", help="静态资源 selectedResourceUids(message,逗号分隔)")
     ap.add_argument("--function-uid", default="", help="可选: 不传=新建记录;传=覆盖更新指定历史记录(场景 A 的 Web 功能 functionUid)")
     ap.add_argument("--session-id", default=None, help="默认取 $HERMES_SESSION_ID")
-    ap.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"接口前缀(默认 {DEFAULT_PREFIX})")
+    ap.add_argument("--prefix", default=None,
+                    help="接口前缀(默认 Nacos 动态发现,失败回退固定地址;显式传则覆盖)")
     ap.add_argument("--dry-run", action="store_true", help="只打印将执行的请求,不真正调用后端")
     args = ap.parse_args()
 
     sid = args.session_id or session_id_from_env()
+    prefix = args.prefix or resolve_backend_prefix()
 
     # 元数据校验: 必填且非占位符(displayName/description 缺省兜底是 agent 的事,
     # 但占位符 xxxx 仍拒绝,防止把假值写进后端)
@@ -102,7 +104,7 @@ def main() -> int:
         if artifacts[art]["kind"] == "url":
             print(f"[info] {ARTIFACT_LABEL[art]} 使用已上传 URL,跳过裸传")
             continue
-        url = f"{args.prefix}{API_UPLOAD_RAW}"
+        url = f"{prefix}{API_UPLOAD_RAW}"
         if args.dry_run:
             print(f"[dry-run] POST {url} (multipart file=@{artifacts[art]['path']})")
             continue
@@ -141,7 +143,7 @@ def main() -> int:
     if missing:
         die(f"以下产物未拿到 previewUrl,不执行 save: {missing}(先解决上传失败,或把已成功的 URL 传回 --*-url 续传)")
 
-    url = f"{args.prefix}{API_FUNCTION_SAVE}"
+    url = f"{prefix}{API_FUNCTION_SAVE}"
     body = build_body(args, urls, file_names)
     try:
         status, resp = http_post_json(url, body)
