@@ -12,7 +12,7 @@ metadata:
 
 - 用户要求"测试 <web路径> 的 <功能>",或要求编写/修改/运行任何 Playwright 测试脚本
 - 用户提到测试计划、测试报告、功能测试
-- **场景 A**:用户消息形如「请帮我创建Web功能测试」,含 projectUid/folderUid/displayName/relativePath/description/selectedTestCaseUids/selectedResourceUids;可能附带 `Web功能 functionUid:xxxxxx`(可选,见下)
+- **场景 A**:用户消息形如「请帮我创建Web测试脚本」或「请帮我执行并修复Web测试脚本」 ,含 projectUid/folderUid/displayName/relativePath/description/selectedTestCaseUids/selectedResourceUids;可能附带 `Web功能 functionUid:xxxxxx`(可选,见下)
 - **场景 B**:用户消息形如「请帮我执行并修改Web测试脚本」,含 functionUid(执行已存在脚本并修复)
 
 ## 用户输入解析
